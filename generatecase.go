@@ -262,13 +262,13 @@ func GetCase5() CaseDemo {
 		Nodes: nodes,
 		Apps: apps,
 		DisruptionBudgets: budgets,
+		MinNodeCountToRestart: -1,
 	}
 }
 
 /*
 group #:[ node1,node2,node3,]
 group #:[ node4,node5,node6,]
-
 */
 func GetCase6() CaseDemo {
 	apps := []Application{
@@ -320,6 +320,7 @@ func GetCase6() CaseDemo {
 		Nodes: nodes,
 		Apps: apps,
 		DisruptionBudgets: budgets,
+		MinNodeCountToRestart: -1,
 	}
 }
 
@@ -380,12 +381,12 @@ func GetCase7() CaseDemo {
 		Nodes: nodes,
 		Apps: apps,
 		DisruptionBudgets: budgets,
+		MinNodeCountToRestart: -1,
 	}
 }
 
 /*
 node7上无app
-
 group #:[ node1,node2,node3,node7,]
 group #:[ node6,node4,node5,]
 
@@ -441,49 +442,62 @@ func GetCase8() CaseDemo {
 		Nodes: nodes,
 		Apps: apps,
 		DisruptionBudgets: budgets,
+		MinNodeCountToRestart: -1,
 	}
 }
 
-func generateCase(nodeNum, appKinds int) CaseDemo {
+// 随机产生需要的apps和nodes, 其中app1的个数在10到200之间
+func generateCase(nodeNum, appKinds, minNodeCountToRestart int) CaseDemo {
 	nodes := make([]Node, 0)
+	node2AppCount := make(map[int]int)
+	// 产生node集合
 	for i := 0; i < nodeNum; i++ {
+		node2AppCount[i] = 0
 		nodes = append(nodes,Node{
 			NodeName: "node" + strconv.Itoa(i),
 		})
 	}
+	// 产生app集合
 	apps := make([]Application, 0)
 	app2Count := make(map[int]int)
-	for i := 0; i < appKinds; i++ {
+	for i := 0; i < appKinds; i++ { // app 种类
 		rand.Seed(time.Now().Unix())
-		appNums := rand.Intn(appKinds - 1)
-		app2Count[i] = appNums
-		if appNums <= 0 { // 最少10个
-			appNums = 1
+		appNums := rand.Intn(200) // 每个app的运行的实例数
+		if appNums < 10 { // 最少10个
+			appNums = 10
 		}
-		record := make(map[int]int)
+		app2Count[i] = appNums
+		record := make(map[int]int) // <nodei, 1>，表示appi是否已经在node上，为保证app的每个实例都飘在不同的节点上
+		nodeNo := 1
 		for j := 0; j < appNums; j++ {
-			nodeNo := 1
-			for {
-				rand.Seed(time.Now().Unix())
-				nodeNo = rand.Intn(nodeNum)
+			rand.Seed(time.Now().Unix())
+			nodeNo = rand.Intn(nodeNum) // 随机一个node节点
+			for {// 为保证app的每个实例都飘在不同的节点上
 				if nodeNo == 0 {
 					nodeNo = 1
 				}
+				// 节点上app个数不能超过50个
+				if node2AppCount[nodeNo] >= 50 {
+					nodeNo++
+					continue
+				}
 				// 避免重复
-				if _, ok := record[nodeNo]; ok {
+				if _, ok := record[nodeNo]; ok { // 已经存在了
+					nodeNo++
 					continue
 				} else {
 					break
 				}
 			}
 			record[nodeNo] = 1
+			node2AppCount[nodeNo]++
 			apps = append(apps, Application{
 				NodeName: "node" + strconv.Itoa(nodeNo),
-				AppName: "app" + strconv.Itoa(j),
+				AppName: "app" + strconv.Itoa(i),
 			})
 		}
 	}
-
+	// 产生预算集合
 	budgets := make([]DisruptionBudget, 0)
 
 	for i := 0; i < appKinds; i++ {
@@ -496,5 +510,6 @@ func generateCase(nodeNum, appKinds int) CaseDemo {
 		Nodes: nodes,
 		Apps: apps,
 		DisruptionBudgets: budgets,
+		MinNodeCountToRestart: minNodeCountToRestart,
 	}
 }

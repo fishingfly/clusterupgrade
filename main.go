@@ -7,16 +7,26 @@ import (
 )
 
 func main() {
+	//GetOptimalUpgradePlans(GetCase1())
+	//GetOptimalUpgradePlans(GetCase2())
+	//GetOptimalUpgradePlans(GetCase3())
+	//GetOptimalUpgradePlans(GetCase4())
+	//GetOptimalUpgradePlans(GetCase5())
+	GetOptimalUpgradePlans(GetCase6())
+	//GetOptimalUpgradePlans(GetCase7())
 	//GetOptimalUpgradePlans(GetCase8())
-	GetOptimalUpgradePlans(generateCase(100, 40))
+	//GetOptimalUpgradePlans(generateCase(1000, 800, -1))
+	//GetOptimalUpgradePlans(generateCase(2000, 1600, -1))
+	//GetOptimalUpgradePlans(generateCase(5000, 4000, 160))
 }
 
 func GetOptimalUpgradePlans(caseDemo CaseDemo){
 	apps := caseDemo.Apps
 	nodes := caseDemo.Nodes
 	budgets := caseDemo.DisruptionBudgets
-	startTime := time.Now()
 	timer :=time.NewTicker(time.Minute * 10)
+	startTime := time.Now()
+	restartCount := 0
 	for {
 		select {
 		case <-timer.C:
@@ -26,15 +36,16 @@ func GetOptimalUpgradePlans(caseDemo CaseDemo){
 		default:
 
 		}
-		err , cu := NewClusterUpgrade(CaseDemo{nodes, apps,  budgets})
+		err , cu := NewClusterUpgrade(CaseDemo{nodes, apps,  budgets, caseDemo.MinNodeCountToRestart})
 		if err != nil {
 			fmt.Println(err.Error())
-			return
-		}
-		if len(nodes) == 0 { // 剪枝无节点就退出
 			break
 		}
-		if len(apps) == 0 { // 剪枝，有节点，但是无app了，那么重启方案就是所有节点
+		if len(nodes) == 0 { // 无节点就退出
+			break
+		}
+		if len(apps) == 0 { // 有节点，但是无app了，那么重启方案就是所有节点
+			restartCount++
 			fmt.Print("group #:[ ")
 			for _, v := range nodes {
 				fmt.Print(v.NodeName + ",")
@@ -46,35 +57,42 @@ func GetOptimalUpgradePlans(caseDemo CaseDemo){
 			fmt.Println(err.Error())
 			return
 		}
-		// 打印一次结果即重启nodes
+		// 打印结果即这一批次需要重启nodes
 		fmt.Print("group #:[ ")
 		for k, _ := range resultMap {
 			fmt.Print(k+",")
 		}
-		fmt.Print("]\n")
+		fmt.Printf("], total number of nodes: %d\n", len(resultMap))
+		restartCount++
 		// 清理已重启node
 		nodes, apps = cu.CleanNodes(resultMap)
+		if len(resultMap) == 1 { // 剪枝，当resultMap长度为1时，说明剩下的节点都只能单独启动，为减少计算，直接给出结果
+			for i:= 0; i < len(nodes); i++ {
+				restartCount++
+				fmt.Print("group #:[ ")
+				fmt.Printf("%s], total number of nodes: %d\n", nodes[i].NodeName, 1)
+			}
+			break
+		}
 	}
-	fmt.Println(time.Now().Sub(startTime).Microseconds())
+	fmt.Printf("the total restart time: %d \n", restartCount)
+	fmt.Println("start time is " + startTime.Format("2006-01-02 15:04:05"))
+	fmt.Println("end time is " + time.Now().Format("2006-01-02 15:04:05"))
 }
 
 type ClusterUpgrade struct {
 	NodeMap map[string]struct{} // 节点集合
 	Node2Apps map[string][]string // 节点映射到的apps存储在map结构中
-	//SelectNodeAppsCountMap map[string]int // 已选择的节点， app的数量记录
 	AppsDisruptionAllowedNum map[string]int // 每个app保证可用性下最大可是失去的应用数
-	// 缓存以i结尾的node最大可以重启的节点数
-	DynamicMap map[int][]Result // 动态规划的中间量保存,<第i个节点,重启节点集>
+	DynamicMap map[int][]Result // 动态规划的中间量保存,<第i个节点,重启节点集>, // 缓存以i结尾的node最大可以重启的节点数
 	NodeIResult Result // 记录从节点0到节点i之间可重启的最大节点集
-	Nodes []Node
-	Apps []Application
-	// 存放最有结果结果
-	RestartPolicyResult []string
-	MinRestartCount int
+	Nodes []Node // 所有节点
+	Apps []Application // 所有app
+	MinNodeCountToRestart int //当可重启节点数达到MinNodeCountToRestart是。立即返回当前最优结果
 }
 
 func NewClusterUpgrade(caseDemo CaseDemo) (error, *ClusterUpgrade) {
-	if len(caseDemo.Apps) == 0 {
+	if len(caseDemo.Apps) == 0 { // 没有app
 		return nil, nil
 	}
 	if len(caseDemo.Nodes) == 0 {
@@ -99,13 +117,11 @@ func NewClusterUpgrade(caseDemo CaseDemo) (error, *ClusterUpgrade) {
 	return nil, &ClusterUpgrade{
 		NodeMap: nodeMap,
 		Node2Apps: node2Apps,
-		//SelectNodeAppsCountMap : make(map[string]int),
 		AppsDisruptionAllowedNum: appsAllowedCountMap,
 		Nodes: caseDemo.Nodes,
 		DynamicMap: make(map[int][]Result),
 		Apps: caseDemo.Apps,
-		MinRestartCount: len(nodeMap),
-		RestartPolicyResult: make([]string, 0),
+		MinNodeCountToRestart: caseDemo.MinNodeCountToRestart,
 	}
 }
 
@@ -129,17 +145,17 @@ func (cu *ClusterUpgrade)CheckNodeAvailability(nodeName string, apps []string, S
 	if len(nodeName) == 0 {
 		return false
 	}
-	if len(apps) == 0 { // 说明节点上没有app，那该节点随时可重启
+	if len(apps) == 0 { // 说明节点上没有app，那该节点随意可重启
 		return true
 	}
-	SelectNodeAppsCountMapTemp := SelectNodeAppsCountMap
+	SelectNodeAppsCountMapTemp := SelectNodeAppsCountMap // 已选择的节点中app的计数<appi, count>
 	for i := 0; i < len(apps); i++ {
 		if _, ok := SelectNodeAppsCountMapTemp[apps[i]]; !ok {
 			SelectNodeAppsCountMapTemp[apps[i]] = 1
 			continue
 		}
 		if (SelectNodeAppsCountMapTemp[apps[i]] + 1) <= cu.AppsDisruptionAllowedNum[apps[i]] { // 未超出app预算
-			SelectNodeAppsCountMapTemp[apps[i]]++
+			SelectNodeAppsCountMapTemp[apps[i]]++ //+1
 			continue
 		} else {// 超出预算
 			return false
@@ -148,7 +164,7 @@ func (cu *ClusterUpgrade)CheckNodeAvailability(nodeName string, apps []string, S
 	return true
 }
 
-// 加入一个节点
+// 加入一个节点，修改SelectNodeAppsCountMap
 func (cu *ClusterUpgrade)addAppCount(nodeName string, apps []string, SelectNodeAppsCountMap map[string]int) {
 	for i := 0; i < len(apps); i++ {
 		if _, ok := SelectNodeAppsCountMap[apps[i]]; !ok {
@@ -162,14 +178,7 @@ func (cu *ClusterUpgrade)addAppCount(nodeName string, apps []string, SelectNodeA
 	}
 }
 
-// 回退一个节点
-func (cu *ClusterUpgrade)minusAppCount(nodeName string, apps []string, SelectNodeAppsCountMap map[string]int) {
-	for i := 0; i < len(apps); i++ {
-		SelectNodeAppsCountMap[apps[i]]--
-	}
-}
-
-// 运行一次，获取剩余节点中满足可用性可重启的最长节点串
+// 获取剩余节点中满足可用性可重启的最长节点串
 func (cu *ClusterUpgrade)GetMaxNodesToRestart() (error, map[string]struct{}) {
 	if len(cu.Node2Apps) == 0 { // 说明没有节点了
 		return nil, nil
@@ -187,12 +196,13 @@ func (cu *ClusterUpgrade)GetMaxNodesToRestart() (error, map[string]struct{}) {
 	maxRestartNodeCount := 1
 	var maxResult Result = cu.DynamicMap[0][0] // 给个默认值
 	for i := 0; i < len(cu.Nodes); i++ { // 遍历所有节点
+		nodeiMaxNodeCount := 1 // 最小是1
 		for j := 0; j < i; j++ {
 			results := cu.DynamicMap[j]
-			for index_result := 0; index_result < len(results); index_result++ {
+			for index_result := 0; index_result < len(results); index_result++ { // 遍历i之前[0, i-1]与node[i]一起重启，检查是否满足可用性
 				tempMap := CopySelectNodeAppsCountMap(results[index_result].SelectNodeAppsCountMap)
-				// 剪枝
 				if cu.CheckNodeAvailability(cu.Nodes[i].NodeName, cu.Node2Apps[cu.Nodes[i].NodeName], tempMap) {
+					// 只考虑满足可用性的results[j]与nodes[i]一起重启
 					selectNodeAppsCountMapTemp := CopySelectNodeAppsCountMap(results[index_result].SelectNodeAppsCountMap)
 					newNodeCount := results[index_result].NodeCount + 1
 					newNodeMap := CopySelectNodeMap(results[index_result].SelectNodeMap)
@@ -204,33 +214,17 @@ func (cu *ClusterUpgrade)GetMaxNodesToRestart() (error, map[string]struct{}) {
 						maxResult = resultTemp
 						maxRestartNodeCount = newNodeCount
 					}
-					cu.DynamicMap[i] = append(cu.DynamicMap[i], resultTemp)
+					if newNodeCount > nodeiMaxNodeCount {
+						nodeiMaxNodeCount = newNodeCount
+					}
+					if cu.MinNodeCountToRestart <= resultTemp.NodeCount && cu.MinNodeCountToRestart > 0{ // 剪枝，节省时间
+						return nil, maxResult.SelectNodeMap
+					}
+					cu.DynamicMap[i] = []Result{resultTemp} // 每个位置保证最大的子串
 				}
 			}
 
 		}
 	}
 	return nil, maxResult.SelectNodeMap
-}
-
-type Result struct{
-	NodeCount int
-	SelectNodeMap map[string]struct{} // 已经选择的节点
-	SelectNodeAppsCountMap map[string]int // 已选择的节点， app的数量计数 appName->count， 便于做判断。
-}
-
-func CopySelectNodeMap(SelectNodeMap map[string]struct{} ) map[string]struct{}{
-	ret := make(map[string]struct{})
-	for k, v := range SelectNodeMap {
-		ret[k] = v
-	}
-	return ret
-}
-
-func CopySelectNodeAppsCountMap(SelectNodeAppsCountMap map[string]int) map[string]int{
-	ret := make(map[string]int)
-	for k, v := range SelectNodeAppsCountMap {
-		ret[k] = v
-	}
-	return ret
 }
