@@ -7,17 +7,18 @@ import (
 )
 
 func main() {
+	//GetOptimalUpgradePlans(GetCase0())
 	//GetOptimalUpgradePlans(GetCase1())
 	//GetOptimalUpgradePlans(GetCase2())
 	//GetOptimalUpgradePlans(GetCase3())
 	//GetOptimalUpgradePlans(GetCase4())
 	//GetOptimalUpgradePlans(GetCase5())
-	GetOptimalUpgradePlans(GetCase6())
+	//GetOptimalUpgradePlans(GetCase6())
 	//GetOptimalUpgradePlans(GetCase7())
 	//GetOptimalUpgradePlans(GetCase8())
 	//GetOptimalUpgradePlans(generateCase(1000, 800, -1))
 	//GetOptimalUpgradePlans(generateCase(2000, 1600, -1))
-	//GetOptimalUpgradePlans(generateCase(5000, 4000, 160))
+	GetOptimalUpgradePlans(generateCase(5000, 4000, 170))
 }
 
 func GetOptimalUpgradePlans(caseDemo CaseDemo){
@@ -51,6 +52,7 @@ func GetOptimalUpgradePlans(caseDemo CaseDemo){
 				fmt.Print(v.NodeName + ",")
 			}
 			fmt.Print("]\n")
+			break
 		}
 		err, resultMap := cu.GetMaxNodesToRestart()
 		if err != nil {

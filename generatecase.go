@@ -7,6 +7,25 @@ import (
 	"time"
 )
 
+// 节点上都没有app
+// node1, node2,node3
+func GetCase0() CaseDemo {
+	apps := []Application{
+	}
+	nodes := []Node{
+		{"node1"},
+		{"node2"},
+		{"node3"},
+	}
+	budgets := []DisruptionBudget{
+	}
+	return CaseDemo{
+		Nodes: nodes,
+		Apps: apps,
+		DisruptionBudgets: budgets,
+	}
+}
+
 // node1, node3
 // node2
 func GetCase1() CaseDemo {
